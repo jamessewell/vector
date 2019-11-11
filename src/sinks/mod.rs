@@ -10,6 +10,7 @@ pub mod clickhouse;
 pub mod console;
 pub mod datadog_metrics;
 pub mod elasticsearch;
+#[cfg(feature = "file")]
 pub mod file;
 pub mod http;
 #[cfg(feature = "rdkafka")]
