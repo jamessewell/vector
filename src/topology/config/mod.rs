@@ -8,6 +8,7 @@ use std::fs::DirBuilder;
 use std::{collections::HashMap, path::PathBuf};
 
 pub mod component;
+mod test;
 mod validation;
 mod vars;
 
@@ -22,6 +23,8 @@ pub struct Config {
     pub sinks: IndexMap<String, SinkOuter>,
     #[serde(default)]
     pub transforms: IndexMap<String, TransformOuter>,
+    #[serde(default)]
+    pub tests: Vec<test::TestDefinition>,
 }
 
 #[derive(Default, Debug, Deserialize, Serialize)]
@@ -182,6 +185,7 @@ impl Config {
             sources: IndexMap::new(),
             sinks: IndexMap::new(),
             transforms: IndexMap::new(),
+            tests: Vec::new(),
         }
     }
 

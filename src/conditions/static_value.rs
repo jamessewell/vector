@@ -1,22 +1,29 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    conditions::{Condition, ConditionDefinition},
+    conditions::{Condition, ConditionConfig, ConditionDescription},
     Event,
 };
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct StaticConfig {
     value: bool,
 }
 
 impl Condition for StaticConfig {
-    fn check(&self, _: &Event) -> Result<bool, String> {
-        return Ok(self.value);
+    fn check(&self, _: &Event) -> bool {
+        return self.value;
+    }
+}
+
+#[typetag::serde(name = "static")]
+impl ConditionConfig for StaticConfig {
+    fn build(&self) -> crate::Result<Box<dyn Condition>> {
+        return Ok(Box::new(self.clone()));
     }
 }
 
 inventory::submit! {
-    ConditionDefinition::new::<StaticConfig>("static")
+    ConditionDescription::new::<StaticConfig>("static")
 }
