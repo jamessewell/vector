@@ -1,10 +1,18 @@
 use crate::topology::config::component::ComponentDescription;
 use crate::Event;
+use indexmap::IndexMap;
 use inventory;
+use std::sync::Arc;
 
+pub mod not;
 pub mod static_value;
 
-pub trait Condition {
+pub trait Condition: Send + Sync {
+    /// Before checking a condition against events it needs to be initialized by
+    /// providing a vec of all sibling conditions. This allows the condition to
+    /// aggregate any children when applicable.
+    fn init(&mut self, siblings: &IndexMap<String, Arc<dyn Condition>>) -> crate::Result<()>;
+
     fn check(&self, e: &Event) -> bool;
 }
 
@@ -16,13 +24,3 @@ pub trait ConditionConfig: std::fmt::Debug {
 pub type ConditionDescription = ComponentDescription<Box<dyn ConditionConfig>>;
 
 inventory::collect!(ConditionDescription);
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn list_types() {
-        assert_eq!(ConditionDescription::types(), ["static"]);
-    }
-}
