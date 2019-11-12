@@ -1,13 +1,12 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use string_cache::DefaultAtom as Atom;
 
 use crate::{
     conditions::{Condition, ConditionConfig, ConditionDescription},
     Event,
 };
-
-//------------------------------------------------------------------------------
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
@@ -24,25 +23,44 @@ pub trait CheckFieldsPredicate: std::fmt::Debug + Send + Sync {
 
 #[derive(Debug, Clone)]
 struct EqualsPredicate {
-    target: String,
+    target: Atom,
     arg: String,
 }
 
+impl EqualsPredicate {
+    pub fn new(
+        target: String,
+        arg: &CheckFieldsPredicateArg,
+    ) -> Result<Box<dyn CheckFieldsPredicate>, String> {
+        match arg {
+            CheckFieldsPredicateArg::String(s) => Ok(Box::new(EqualsPredicate {
+                target: target.into(),
+                arg: s.clone(),
+            })),
+            _ => Err("equals predicate requires a string argument".to_owned()),
+        }
+    }
+}
+
 impl CheckFieldsPredicate for EqualsPredicate {
-    fn check(&self, e: &Event) -> bool {
-        false
+    fn check(&self, event: &Event) -> bool {
+        event
+            .as_log()
+            .get(&self.target)
+            .map(|f| f.as_bytes())
+            .map_or(false, |b| b == self.arg.as_bytes())
     }
 }
 
 fn build_predicate(
+    predicate: &str,
     target: String,
-    predicate: String,
     arg: &CheckFieldsPredicateArg,
-) -> Result<Box<dyn CheckFieldsPredicate>, Vec<String>> {
-    Ok(Box::new(EqualsPredicate {
-        target: target,
-        arg: predicate,
-    }))
+) -> Result<Box<dyn CheckFieldsPredicate>, String> {
+    match predicate {
+        "eq" | "equals" => EqualsPredicate::new(target, arg),
+        _ => Err(format!("predicate type '{}' not recognized", predicate)),
+    }
 }
 
 fn build_predicates(
@@ -63,10 +81,11 @@ fn build_predicates(
             })
             .and_then(|i| {
                 let mut target = target_pred.clone();
-                let pred = target.split_off(i);
-                match build_predicate(target, pred, arg) {
+                let pred = target.split_off(i + 1);
+                target.truncate(target.len() - 1);
+                match build_predicate(&pred, target, arg) {
                     Ok(pred) => predicates.push(pred),
-                    Err(errs) => errors.extend(errs),
+                    Err(err) => errors.push(err),
                 }
                 Some(())
             })
@@ -131,3 +150,81 @@ impl Condition for CheckFields {
 }
 
 //------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::Event;
+
+    #[test]
+    fn check_predicate_errors() {
+        let cases = vec![
+            ("foo", "predicate not found in check_fields value 'foo', format must be <target>.<predicate>"),
+            (".nah", "predicate not found in check_fields value '.nah', format must be <target>.<predicate>"),
+            ("", "predicate not found in check_fields value '', format must be <target>.<predicate>"),
+            ("what.", "predicate not found in check_fields value 'what.', format must be <target>.<predicate>"),
+            ("foo.not_real", "predicate type 'not_real' not recognized"),
+        ];
+
+        let mut aggregated_preds: IndexMap<String, CheckFieldsPredicateArg> = IndexMap::new();
+        let mut exp_errs = Vec::new();
+        for (pred, exp) in cases {
+            aggregated_preds.insert(pred.into(), CheckFieldsPredicateArg::String("foo".into()));
+            exp_errs.push(exp);
+
+            let mut preds: IndexMap<String, CheckFieldsPredicateArg> = IndexMap::new();
+            preds.insert(pred.into(), CheckFieldsPredicateArg::String("foo".into()));
+
+            assert_eq!(
+                CheckFieldsConfig { predicates: preds }
+                    .build()
+                    .err()
+                    .unwrap()
+                    .to_string(),
+                exp.to_owned()
+            );
+        }
+
+        let mut exp_err = exp_errs.join("\n");
+        exp_err.insert_str(0, "failed to parse predicates:\n");
+
+        assert_eq!(
+            CheckFieldsConfig {
+                predicates: aggregated_preds
+            }
+            .build()
+            .err()
+            .unwrap()
+            .to_string(),
+            exp_err
+        );
+    }
+
+    #[test]
+    fn check_field_equals() {
+        let mut preds: IndexMap<String, CheckFieldsPredicateArg> = IndexMap::new();
+        preds.insert(
+            "message.equals".into(),
+            CheckFieldsPredicateArg::String("foo".into()),
+        );
+        preds.insert(
+            "other_thing.eq".into(),
+            CheckFieldsPredicateArg::String("bar".into()),
+        );
+
+        let cond = CheckFieldsConfig { predicates: preds }.build().unwrap();
+
+        let mut event = Event::from("foo");
+        assert_eq!(cond.check(&event), false);
+
+        event
+            .as_mut_log()
+            .insert_implicit("other_thing".into(), "bar".into());
+        assert_eq!(cond.check(&event), true);
+
+        event
+            .as_mut_log()
+            .insert_implicit("message".into(), "not foo".into());
+        assert_eq!(cond.check(&event), false);
+    }
+}
