@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use inventory;
 use std::sync::Arc;
 
+pub mod check_fields;
 pub mod not;
 pub mod static_value;
 
